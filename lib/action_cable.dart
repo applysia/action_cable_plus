@@ -13,10 +13,12 @@ typedef _OnChannelMessageFunction = void Function(Map message);
 class ActionCable {
   DateTime? _lastPing;
   late Timer _timer;
+  Duration? timeoutAfter;
+  Duration? healthCheckDuration;
   late WebSocketChannel _socketChannel;
   late StreamSubscription _listener;
   void Function()? onConnected;
-  void Function()? onCannotConnect;
+  void Function(dynamic error)? onCannotConnect;
   void Function()? onConnectionLost;
   final Map<String, _OnChannelSubscribedFunction?>
       _onChannelSubscribedCallbacks = {};
@@ -41,12 +43,15 @@ class ActionCable {
     );
     _listener = _socketChannel.stream.listen(
       _onData,
-      onError: (_) {
+      onError: (error) {
         disconnect(); // close a socket and the timer
-        onCannotConnect?.call();
+        onCannotConnect?.call(error);
       },
     );
-    _timer = Timer.periodic(const Duration(seconds: 3), healthCheck);
+    _timer = Timer.periodic(
+      healthCheckDuration ?? const Duration(seconds: 3),
+      healthCheck,
+    );
   }
 
   void disconnect() {
@@ -61,7 +66,8 @@ class ActionCable {
     if (_lastPing == null) {
       return;
     }
-    if (DateTime.now().difference(_lastPing!) > const Duration(seconds: 6)) {
+    if (DateTime.now().difference(_lastPing!) >
+        (timeoutAfter ?? const Duration(seconds: 6))) {
       disconnect();
       onConnectionLost?.call();
     }
@@ -137,10 +143,18 @@ class ActionCable {
         }
         break;
       case 'disconnect':
-        final channelId = parseChannelId(payload['identifier']);
-        final onDisconnected = _onChannelDisconnectedCallbacks[channelId];
-        if (onDisconnected != null) {
-          onDisconnected();
+        final identifier = payload['identifier'];
+        if (identifier != null) {
+          final channelId = parseChannelId(payload['identifier']);
+          final onDisconnected = _onChannelDisconnectedCallbacks[channelId];
+          if (onDisconnected != null) {
+            onDisconnected();
+          }
+        } else {
+          final reason = payload['reason'];
+          if (reason != null) {
+            onCannotConnect?.call(reason);
+          }
         }
         break;
       case 'confirm_subscription':
