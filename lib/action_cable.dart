@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'channel_id.dart';
+import 'web_socket/web_socket_interface.dart';
 
-typedef _OnConnectedFunction = void Function();
-typedef _OnConnectionLostFunction = void Function();
-typedef _OnCannotConnectFunction = void Function();
 typedef _OnChannelSubscribedFunction = void Function();
 typedef _OnChannelDisconnectedFunction = void Function();
 typedef _OnChannelMessageFunction = void Function(Map message);
@@ -15,30 +13,39 @@ typedef _OnChannelMessageFunction = void Function(Map message);
 class ActionCable {
   DateTime? _lastPing;
   late Timer _timer;
-  late IOWebSocketChannel _socketChannel;
+  late WebSocketChannel _socketChannel;
   late StreamSubscription _listener;
-  _OnConnectedFunction? onConnected;
-  _OnCannotConnectFunction? onCannotConnect;
-  _OnConnectionLostFunction? onConnectionLost;
-  Map<String, _OnChannelSubscribedFunction?> _onChannelSubscribedCallbacks = {};
-  Map<String, _OnChannelDisconnectedFunction?> _onChannelDisconnectedCallbacks =
-      {};
-  Map<String, _OnChannelMessageFunction?> _onChannelMessageCallbacks = {};
+  void Function()? onConnected;
+  void Function()? onCannotConnect;
+  void Function()? onConnectionLost;
+  final Map<String, _OnChannelSubscribedFunction?>
+      _onChannelSubscribedCallbacks = {};
+  final Map<String, _OnChannelDisconnectedFunction?>
+      _onChannelDisconnectedCallbacks = {};
+  final Map<String, _OnChannelMessageFunction?> _onChannelMessageCallbacks = {};
+
+  final IWebSocket _webSocket = IWebSocket();
 
   ActionCable.Connect(
     String url, {
-    Map<String, String> headers: const {},
+    Map<String, String> headers = const {},
     this.onConnected,
     this.onConnectionLost,
     this.onCannotConnect,
   }) {
     // rails gets a ping every 3 seconds
-    _socketChannel = IOWebSocketChannel.connect(url,
-        headers: headers, pingInterval: Duration(seconds: 3));
-    _listener = _socketChannel.stream.listen(_onData, onError: (_) {
-      this.disconnect(); // close a socket and the timer
-      if (this.onCannotConnect != null) this.onCannotConnect!();
-    });
+    _socketChannel = _webSocket.connect(
+      url,
+      headers: headers,
+      pingInterval: const Duration(seconds: 3),
+    );
+    _listener = _socketChannel.stream.listen(
+      _onData,
+      onError: (_) {
+        disconnect(); // close a socket and the timer
+        if (onCannotConnect != null) onCannotConnect!();
+      },
+    );
     _timer = Timer.periodic(const Duration(seconds: 3), healthCheck);
   }
 
@@ -54,19 +61,21 @@ class ActionCable {
     if (_lastPing == null) {
       return;
     }
-    if (DateTime.now().difference(_lastPing!) > Duration(seconds: 6)) {
-      this.disconnect();
-      if (this.onConnectionLost != null) this.onConnectionLost!();
+    if (DateTime.now().difference(_lastPing!) > const Duration(seconds: 6)) {
+      disconnect();
+      if (onConnectionLost != null) onConnectionLost!();
     }
   }
 
   // channelName being 'Chat' will be considered as 'ChatChannel',
   // 'Chat', { id: 1 } => { channel: 'ChatChannel', id: 1 }
-  void subscribe(String channelName,
-      {Map? channelParams,
-      _OnChannelSubscribedFunction? onSubscribed,
-      _OnChannelDisconnectedFunction? onDisconnected,
-      _OnChannelMessageFunction? onMessage}) {
+  void subscribe(
+    String channelName, {
+    Map? channelParams,
+    _OnChannelSubscribedFunction? onSubscribed,
+    _OnChannelDisconnectedFunction? onDisconnected,
+    _OnChannelMessageFunction? onMessage,
+  }) {
     final channelId = encodeChannelId(channelName, channelParams);
 
     _onChannelSubscribedCallbacks[channelId] = onSubscribed;
@@ -87,8 +96,12 @@ class ActionCable {
         .add(jsonEncode({'identifier': channelId, 'command': 'unsubscribe'}));
   }
 
-  void performAction(String channelName,
-      {String? action, Map? channelParams, Map? actionParams}) {
+  void performAction(
+    String channelName, {
+    String? action,
+    Map? channelParams,
+    Map? actionParams,
+  }) {
     final channelId = encodeChannelId(channelName, channelParams);
 
     actionParams ??= {};
