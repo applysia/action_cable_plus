@@ -26,7 +26,7 @@ class ActionCable {
 
   final IWebSocket _webSocket = IWebSocket();
 
-  ActionCable.Connect(
+  ActionCable.connect(
     String url, {
     Map<String, String> headers = const {},
     this.onConnected,
@@ -43,7 +43,7 @@ class ActionCable {
       _onData,
       onError: (_) {
         disconnect(); // close a socket and the timer
-        if (onCannotConnect != null) onCannotConnect!();
+        onCannotConnect?.call();
       },
     );
     _timer = Timer.periodic(const Duration(seconds: 3), healthCheck);
@@ -63,7 +63,7 @@ class ActionCable {
     }
     if (DateTime.now().difference(_lastPing!) > const Duration(seconds: 6)) {
       disconnect();
-      if (onConnectionLost != null) onConnectionLost!();
+      onConnectionLost?.call();
     }
   }
 
@@ -114,8 +114,8 @@ class ActionCable {
     });
   }
 
-  void _onData(dynamic payload) {
-    payload = jsonDecode(payload);
+  void _onData(dynamic jsonPayload) {
+    final payload = jsonDecode(jsonPayload);
 
     if (payload['type'] != null) {
       _handleProtocolMessage(payload);
@@ -133,7 +133,7 @@ class ActionCable {
         break;
       case 'welcome':
         if (onConnected != null) {
-          onConnected!();
+          onConnected?.call();
         }
         break;
       case 'disconnect':

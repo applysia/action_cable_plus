@@ -14,7 +14,7 @@ This is a dart port of the client and protocol implementation which is available
 ### Connecting to a channel 🙌
 
 ```dart
-cable = ActionCable.Connect(
+cable = ActionCable.connect(
   "ws://10.0.2.2:3000/cable",
   headers: {
     "Authorization": "Some Token",
